@@ -10,9 +10,14 @@ import { PluginSpec } from "molstar/lib/mol-plugin/spec";
 import { polymerHotspot } from "./hotspot-preset";
 import { PluginConfig } from "molstar/lib/mol-plugin/config";
 import { HotspotThemeProvider } from "./hotspot-theme";
-import { StateObjectRef, StateSelection } from "molstar/lib/mol-state";
+import {
+  StateObjectRef,
+  StateObjectSelector,
+  StateSelection,
+} from "molstar/lib/mol-state";
 import { StructureColorPropertyProvider } from "./structure-property-provider";
 import { StructureFromModel } from "molstar/lib/mol-plugin-state/transforms/model";
+import { PluginStateObject } from "molstar/lib/mol-plugin-state/objects";
 
 declare global {
   interface Window {
@@ -42,12 +47,38 @@ export function MolStarWrapper() {
       data,
       "pdb"
     );
-    await plugin.builders.structure.hierarchy.applyPreset(
+    const preset = await plugin.builders.structure.hierarchy.applyPreset(
       trajectory,
       "default"
     );
 
-    return trajectory;
+    return { trajectory, preset };
+  };
+
+  const applyHotspot = async (
+    plugin: PluginUIContext,
+    trajectory: StateObjectSelector,
+    preset: { representation: any } & any
+  ) => {
+    const ref = StateObjectRef.resolve(plugin.state.data, trajectory)!;
+    const structure = StateSelection.Generators.byRef(ref.transform.ref)
+      .subtree()
+      .withTransformer(StructureFromModel)
+      .select(plugin.state.data)[0];
+    if (structure.obj?.data) {
+      // This should trigger an update/rerun of the theme?
+      StructureColorPropertyProvider.set(
+        structure.obj?.data,
+        { pocket: [1, 2, 3] },
+        [1, 2, 3]
+      );
+    }
+
+    await plugin
+      .build()
+      .to(preset!.representation.representations.polymer)
+      .update({})
+      .commit();
   };
 
   useEffect(() => {
@@ -64,20 +95,10 @@ export function MolStarWrapper() {
       window.molstar = plugin;
 
       registerItems(plugin);
-      const trajectory = await loadData(plugin);
 
-      const ref = StateObjectRef.resolve(plugin.state.data, trajectory)!;
-      const structure = StateSelection.Generators.byRef(ref.transform.ref)
-        .subtree()
-        .withTransformer(StructureFromModel)
-        .select(plugin.state.data)[0];
-      if (structure.obj?.data) {
-        StructureColorPropertyProvider.set(
-          structure.obj?.data,
-          { pocket: [1, 2, 3] },
-          [1, 2, 3]
-        );
-      }
+      const { trajectory, preset } = await loadData(plugin);
+
+      applyHotspot(plugin, trajectory, preset);
     }
     init();
     return () => {
